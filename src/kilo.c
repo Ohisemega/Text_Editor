@@ -1,4 +1,5 @@
-// #include <stdio.h>
+#include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
@@ -6,7 +7,7 @@
 // global variable to store the original state of the terminal before we edit it's 
 // variable values. This allows us to restore the terminal 
 // state to it's original value at program inception
-struct termios org_termios;
+struct termios orig_termios;
 
 //
 void disbleRawMode(){
@@ -21,8 +22,10 @@ void disbleRawMode(){
 //to do this, we use the tcgetattr() function to read the current 
 //attributes into a struct and write the terminal attributes back out.
 void enableRawMode(){
-    tcgetattr(STDIN_FILENO, &org_termios);
-    struct termios raw = org_termios;
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    struct termios raw = orig_termios;
+    
+    // atexit() function is called whenever the program exits
     atexit(disbleRawMode);
 
     // the ICANON flag (2 in decimal or 0b 0000 0010) allows us to turn off the canonical flag and 
@@ -42,6 +45,12 @@ void enableRawMode(){
 int main(){
     char c;
     enableRawMode();
-    while (read(STDIN_FILENO, &c, 1) ==1 && c != 'q');
+    while (read(STDIN_FILENO, &c, 1) ==1 && c != 'q'){
+        if(iscntrl(c)){
+            printf("%d\n", c);
+        }else{
+            printf("%d ('%c')\n", c, c);
+        }
+    }
     return 0;
 }
