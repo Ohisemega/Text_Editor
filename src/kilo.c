@@ -38,8 +38,9 @@ void enableRawMode(){
     // other operand except for the 4th and 2nd digit
     // Bit AND works like ===> 1111 & 1011 == 1011, 1011001 & 1111111 ===> 1011001
     // and then we can use that to mask the variables in the c_lfag variable
-    raw.c_lflag &= ~(ECHO | ICANON); 
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    raw.c_iflag &= ~(IXON);
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN| ISIG); 
+ q   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
 int main(){
@@ -54,3 +55,4 @@ int main(){
     }
     return 0;
 }
+
