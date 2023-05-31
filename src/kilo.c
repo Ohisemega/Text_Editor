@@ -1,3 +1,4 @@
+/*** includes ***/
 #include <stdio.h>
 #include <errno.h>
 #include <ctype.h>
@@ -5,11 +6,20 @@
 #include <termios.h>
 #include <unistd.h>
 
+/*** data ***/
 // global variable to store the original state of the terminal before we edit it's 
 // variable values. This allows us to restore the terminal 
 // state to it's original value at program inception
 struct termios orig_termios;
 
+/*** terminal ***/
+/* the die function prints an error message and exits the function
+    Most C library functions that fail will set the global errno variable 
+    to indicate what the error was. perror() looks at the global errno variable and 
+    prints a descriptive error message for it. It also prints the string given to it 
+    before it prints the error message, which is meant to provide context about what 
+    part of your code caused the error.
+*/
 void die(const char* s){
     perror(s); // comes from the stdio.h library
     exit(1); // comes from the stdlib.h library
@@ -74,21 +84,18 @@ void enableRawMode(){
         die("tcsetattr");
 }
 
-// the die function prints an error message and exits the function
-/*Most C library functions that fail will set the global errno variable 
-    to indicate what the error was. perror() looks at the global errno variable and 
-    prints a descriptive error message for it. It also prints the string given to it 
-    before it prints the error message, which is meant to provide context about what 
-    part of your code caused the error.
-*/
-
+/*** init ***/
 int main(){
     enableRawMode();
     while (1){
         char c = '\0';
-        read(STDIN_FILENO, &c, 1);
+        /*In Cygwin, when read() times out it returns -1 with an errno of EAGAIN, 
+        instead of just returning 0 like it’s supposed to. To make it work in Cygwin,
+        we won’t treat EAGAIN as an error.*/
+        if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN)
+            die("read");
         if(iscntrl(c)){
-            printf("%d\r\n", c);//carriage return added to out printf statements rather than allowing the terminal implicitly implement it
+            printf("%d\r\n", c); // carriage return added to out printf statements rather than allowing the terminal implicitly implement it
         }else{
             printf("%d ('%c')\r\n", c, c);
         }
