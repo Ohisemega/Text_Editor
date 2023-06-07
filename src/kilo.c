@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 /*** #defines ***/
 // Now we map the 'cntrl + q' keys press to be quit rather than just q
@@ -17,7 +18,14 @@
 // global variable to store the original state of the terminal before we edit it's 
 // variable values. This allows us to restore the terminal 
 // state to it's original value at program inception
-struct termios orig_termios;
+
+struct editorCfg{
+    int screenRows;
+    int screenColumns;
+    struct termios orig_termios;
+};
+
+struct editorCfg EdiCfg;
 
 /*** terminal ***/
 /* the die function prints an error message and exits the function
@@ -28,6 +36,11 @@ struct termios orig_termios;
     part of your code caused the error.
 */
 void die(const char* s){
+    //we would like to clear screen when 'CTRL Q' is pressed
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[1J", 4);
+    write(STDOUT_FILENO, "\x1b[0J", 4);
+    write(STDIN_FILENO, "\x1b[H", 3);
     perror(s); // comes from the stdio.h library
     exit(1); // comes from the stdlib.h library
 }
@@ -35,7 +48,7 @@ void die(const char* s){
 // calls the tcseattr() function to set the values of the terminal to the values
 // of the default terminal before exit
 void disbleRawMode(){
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1)
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &EdiCfg.orig_termios) == -1)
         die("tcsetattr");
 }
 
@@ -47,9 +60,8 @@ void disbleRawMode(){
 //to do this, we use the tcgetattr() function to read the current 
 //attributes into a struct and write the terminal attributes back out.
 void enableRawMode(){
-    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1)
-        die("tcsetattr");
-    struct termios raw = orig_termios;
+    if (tcgetattr(STDIN_FILENO, &EdiCfg.orig_termios) == -1) die("tcsetattr");
+    struct termios raw = EdiCfg.orig_termios;
     
     // atexit() function is called whenever the program exits
     atexit(disbleRawMode);
@@ -84,11 +96,8 @@ void enableRawMode(){
       the number of bytes read.
     */
     raw.c_oflag &= ~(OPOST); // OFLAGS are output flags
-
-
     raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG); // LFLAGS are local flags
-    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
-        die("tcsetattr");
+    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
 
 char editorReadKey(){
@@ -98,10 +107,34 @@ char editorReadKey(){
         instead of just returning 0 like it’s supposed to. To make it work in Cygwin,
         we won’t treat EAGAIN as an error.*/
     while ((nread = read(STDIN_FILENO, &c, 1)) != 1){
-        if(nread == -1 && errno != EAGAIN) die("editor_read");
+        if(nread == -1 && errno != EAGAIN) die("editorReadKey");
     }
     return c;
 }
+
+/*
+    On most systems, you should be able to get the size of the terminal by 
+    simply calling ioctl() with the TIOCGWINSZ request. (As far as I can tell, 
+    it stands for Terminal IOCtl (which itself stands for Input/Output Control) 
+    Get WINdow SiZe.)
+*/
+/*  As a fail safe, we can get the window size by moving the cursor 
+        to the bottom of the screen and using the escape sequence route to 
+        query the device cursor's position*/
+int getWindowSize(int* rows, int* cols){
+    struct winsize ws;
+    int ret;
+    if(1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) ==-1 || ws.ws_col ==0){
+        if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12){
+            ret = -1;
+        }
+    }else{
+        *rows = ws.ws_row;
+        *cols = ws.ws_col;
+        ret = 0;
+    }
+    return ret;
+} 
 
 /*** input ***/
 char editorProcessKeyPress(){
@@ -118,6 +151,13 @@ char editorProcessKeyPress(){
 }
 
 /*** output ***/
+void editorDrawRows(){
+    int y;
+    for(y = 0; y < EdiCfg.screenRows; ++y){
+        write(STDOUT_FILENO, "~\r\n", 3);
+    }
+}
+
 void editorClearScreen(){
     // The 4 in our write() call means we are writing 4 bytes out to the terminal. 
     // The first byte is \x1b, which is the escape character, or 27 in decimal.
@@ -129,16 +169,25 @@ void editorClearScreen(){
     // 0 is the default number for the 'J' command, and it clears the screen from the cursor to
     // the end. Both STD_OUT and write(...) come from <unistd.h> library header file
     write(STDOUT_FILENO, "\x1b[2J", 4);
-
+    
     // the 'H' - command actually helps to position the cursor. The H command actually takes two arguments:
     // the row number and the column number at which to position the cursor. Multiple arguments are separated 
     // by a ; character. For example "\x1b[12;24H"
     write(STDIN_FILENO, "\x1b[H", 3);
+
+    editorDrawRows();
+    write(STDIN_FILENO, "\x1b[H", 3);
 }
 
 /*** init ***/
+//initTheEditor()'s role is to provide the dimensions of the screen 
+void initTheEditor(){
+    if(getWindowSize(&EdiCfg.screenRows, &EdiCfg.screenColumns) == -1) die("initTheEditor");
+}
+
 int main(){
     enableRawMode();
+    initTheEditor();
     while (1){
         char c = '\0';  
         editorClearScreen();
