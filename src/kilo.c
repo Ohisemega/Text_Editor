@@ -6,6 +6,13 @@
 #include <termios.h>
 #include <unistd.h>
 
+/*** #defines ***/
+// Now we map the 'cntrl + q' keys press to be quit rather than just q
+// The CTRL_KEY macro bitwise-ANDs the charater provided in its argument with
+// the value 00011111. This mirrors the action of the 'control key' on the keyboard
+#define CNTRL_KEY(c) (0x1F & c) //mimicks the function fo the control key
+
+
 /*** data ***/
 // global variable to store the original state of the terminal before we edit it's 
 // variable values. This allows us to restore the terminal 
@@ -84,22 +91,65 @@ void enableRawMode(){
         die("tcsetattr");
 }
 
+char editorReadKey(){
+    int nread;
+    char c;
+    /*In Cygwin, when read() times out it returns -1 with an errno of EAGAIN, 
+        instead of just returning 0 like it’s supposed to. To make it work in Cygwin,
+        we won’t treat EAGAIN as an error.*/
+    while ((nread = read(STDIN_FILENO, &c, 1)) != 1){
+        if(nread == -1 && errno != EAGAIN) die("editor_read");
+    }
+    return c;
+}
+
+/*** input ***/
+char editorProcessKeyPress(){
+    char c = editorReadKey();
+    switch (c){
+        case CNTRL_KEY('q'):
+            exit(0);
+            break;
+
+        default:
+            break;
+    }
+    return c;
+}
+
+/*** output ***/
+void editorClearScreen(){
+    // The 4 in our write() call means we are writing 4 bytes out to the terminal. 
+    // The first byte is \x1b, which is the escape character, or 27 in decimal.
+    // folowed by the '[' character. This is known as the ESCAPE SEQUENCE.
+    /* Escape sequences instruct the terminal to do various text formatting tasks, 
+    such as coloring text, moving the cursor around, and clearing parts of the screen. */
+    // escape sequence commands take 2 arguments: an number (N) and a letter (J, H, e.t.c)
+    // in the format: \x1bNJ where 'N' is a number. J is the command and J clears the screen.
+    // 0 is the default number for the 'J' command, and it clears the screen from the cursor to
+    // the end. Both STD_OUT and write(...) come from <unistd.h> library header file
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+
+    // the 'H' - command actually helps to position the cursor. The H command actually takes two arguments:
+    // the row number and the column number at which to position the cursor. Multiple arguments are separated 
+    // by a ; character. For example "\x1b[12;24H"
+    write(STDIN_FILENO, "\x1b[H", 3);
+}
+
 /*** init ***/
 int main(){
     enableRawMode();
     while (1){
-        char c = '\0';
-        /*In Cygwin, when read() times out it returns -1 with an errno of EAGAIN, 
-        instead of just returning 0 like it’s supposed to. To make it work in Cygwin,
-        we won’t treat EAGAIN as an error.*/
-        if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN)
-            die("read");
+        char c = '\0';  
+        editorClearScreen();
+        c = editorProcessKeyPress(); 
+        // if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN)
+        //     die("read");
         if(iscntrl(c)){
             printf("%d\r\n", c); // carriage return added to out printf statements rather than allowing the terminal implicitly implement it
         }else{
             printf("%d ('%c')\r\n", c, c);
         }
-        if(c == 'q') break;
     }
     return 0;
 }
