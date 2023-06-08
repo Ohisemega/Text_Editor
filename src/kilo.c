@@ -38,8 +38,8 @@ struct editorCfg EdiCfg;
 void die(const char* s){
     //we would like to clear screen when 'CTRL Q' is pressed
     write(STDOUT_FILENO, "\x1b[2J", 4);
-    write(STDOUT_FILENO, "\x1b[1J", 4);
-    write(STDOUT_FILENO, "\x1b[0J", 4);
+    // write(STDOUT_FILENO, "\x1b[1J", 4);
+    // write(STDOUT_FILENO, "\x1b[0J", 4);
     write(STDIN_FILENO, "\x1b[H", 3);
     perror(s); // comes from the stdio.h library
     exit(1); // comes from the stdlib.h library
@@ -112,6 +112,48 @@ char editorReadKey(){
     return c;
 }
 
+// the n command can be used to query the terminal for device status information
+// we want to give the number 6 for cursor position and read the output from standard input
+
+int getCursorPosition(int* rows, int* cols){
+    int ret;
+    char c;
+    char buf[32];
+    unsigned int i = 0;
+
+    // this writes the position of the cursor to the bottom right end of the screen
+    // writing to stdout file is basically writing to the screen an output value of values
+    // writing the escape sequence with the 'n' comand sends a query to the terminal to
+    // return the cursor's position on the screen
+    if(write(STDOUT_FILENO, "\x1b[6n", 4) != 4){ 
+        ret = -1;
+    }else{
+        ret =-1;
+        for(i = 0; i < sizeof(buf) - 1; i++){
+            // this reads the new position of the cursor on the screen
+            // the values are read into a buffer the size of the 3rd argument 
+            if(read(STDIN_FILENO, &buf[i], sizeof(char)) != 1) break;
+            if iscntrl(buf[i]){
+                printf("%d\r\n", buf[i]);
+            }else{
+                printf("%d (%c)\r\n", buf[i], buf[i]);
+            }
+            if(buf[i] == 'R') break;
+        }
+        buf[i] = '\0';
+
+        // we want to avoid printing out the first character on the 
+        // stdout file because the first character is an escape sequence which 
+        // the terminal will detect
+        printf("\r\n&buf[1]: '%s'\r\n", &buf[1]); 
+        if(buf[0] != '\x1b' || buf[1] != '[]') ret = -1;
+        if(sscanf(&buf[2], "%d;%d", rows, cols) != 2) ret = -1; // takes input from a variable and parses it into a variable(s) of specified formatting
+        ret = 0;
+    }
+    editorReadKey();
+    return ret;
+}
+
 /*
     On most systems, you should be able to get the size of the terminal by 
     simply calling ioctl() with the TIOCGWINSZ request. (As far as I can tell, 
@@ -125,8 +167,10 @@ int getWindowSize(int* rows, int* cols){
     struct winsize ws;
     int ret;
     if(1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) ==-1 || ws.ws_col ==0){
-        if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12){
+        if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12){// falll back procedure
             ret = -1;
+        }else{
+            ret = getCursorPosition(rows, cols);
         }
     }else{
         *rows = ws.ws_row;
@@ -142,9 +186,6 @@ char editorProcessKeyPress(){
     switch (c){
         case CNTRL_KEY('q'):
             exit(0);
-            break;
-
-        default:
             break;
     }
     return c;
@@ -163,7 +204,7 @@ void editorClearScreen(){
     // The first byte is \x1b, which is the escape character, or 27 in decimal.
     // folowed by the '[' character. This is known as the ESCAPE SEQUENCE.
     /* Escape sequences instruct the terminal to do various text formatting tasks, 
-    such as coloring text, moving the cursor around, and clearing parts of the screen. */
+       such as coloring text, moving the cursor around, and clearing parts of the screen. */
     // escape sequence commands take 2 arguments: an number (N) and a letter (J, H, e.t.c)
     // in the format: \x1bNJ where 'N' is a number. J is the command and J clears the screen.
     // 0 is the default number for the 'J' command, and it clears the screen from the cursor to
