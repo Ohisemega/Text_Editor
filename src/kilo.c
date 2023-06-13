@@ -40,7 +40,7 @@ void die(const char* s){
     write(STDOUT_FILENO, "\x1b[2J", 4);
     // write(STDOUT_FILENO, "\x1b[1J", 4);
     // write(STDOUT_FILENO, "\x1b[0J", 4);
-    write(STDIN_FILENO, "\x1b[H", 3);
+    write(STDOUT_FILENO, "\x1b[H", 3);
     perror(s); // comes from the stdio.h library
     exit(1); // comes from the stdlib.h library
 }
@@ -52,13 +52,10 @@ void disbleRawMode(){
         die("tcsetattr");
 }
 
-//this function turns off terminal echo. 
-//On default the terminal is in 'cooked mode' or 'canonical mode'
-//meaning that characters are passed into the stream buffer
-//and enter must be pressed before the characters are processed
-//now, we intend toset it to 'raw mode' 
-//to do this, we use the tcgetattr() function to read the current 
-//attributes into a struct and write the terminal attributes back out.
+// this function turns off terminal echo. 
+// On default the terminal is in 'cooked mode' or 'canonical mode' meaning that characters are passed into the stream buffer
+// and enter must be pressed before the characters are processed now, we intend toset it to 'raw mode' 
+// to do this, we use the tcgetattr() function to read the current attributes into a struct and write the terminal attributes back out.
 void enableRawMode(){
     if (tcgetattr(STDIN_FILENO, &EdiCfg.orig_termios) == -1) die("tcsetattr");
     struct termios raw = EdiCfg.orig_termios;
@@ -114,10 +111,8 @@ char editorReadKey(){
 
 // the n command can be used to query the terminal for device status information
 // we want to give the number 6 for cursor position and read the output from standard input
-
-int getCursorPosition(int* rows, int* cols){
+int getCurrentCursorPosition(int* rows, int* cols){
     int ret;
-    char c;
     char buf[32];
     unsigned int i = 0;
 
@@ -141,14 +136,14 @@ int getCursorPosition(int* rows, int* cols){
             if(buf[i] == 'R') break;
         }
         buf[i] = '\0';
+        ret = 0;
 
         // we want to avoid printing out the first character on the 
         // stdout file because the first character is an escape sequence which 
         // the terminal will detect
         printf("\r\n&buf[1]: '%s'\r\n", &buf[1]); 
-        if(buf[0] != '\x1b' || buf[1] != '[]') ret = -1;
+        if(buf[0] != '\x1b' || buf[1] != '[') ret = -1;
         if(sscanf(&buf[2], "%d;%d", rows, cols) != 2) ret = -1; // takes input from a variable and parses it into a variable(s) of specified formatting
-        ret = 0;
     }
     editorReadKey();
     return ret;
@@ -166,11 +161,13 @@ int getCursorPosition(int* rows, int* cols){
 int getWindowSize(int* rows, int* cols){
     struct winsize ws;
     int ret;
-    if(1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) ==-1 || ws.ws_col ==0){
-        if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12){// falll back procedure
+    if(1 || (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) ==-1) || (ws.ws_col == 0)){
+        //this condition writes the position of the cursor to the bottom right end of the screen
+        if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12){// fall back procedure
             ret = -1;
         }else{
-            ret = getCursorPosition(rows, cols);
+            // write(STDOUT_FILENO, )editorReadKey();
+            ret = getCurrentCursorPosition(rows, cols);
         }
     }else{
         *rows = ws.ws_row;
@@ -214,10 +211,10 @@ void editorClearScreen(){
     // the 'H' - command actually helps to position the cursor. The H command actually takes two arguments:
     // the row number and the column number at which to position the cursor. Multiple arguments are separated 
     // by a ; character. For example "\x1b[12;24H"
-    write(STDIN_FILENO, "\x1b[H", 3);
+    write(STDOUT_FILENO, "\x1b[H", 3);
 
     editorDrawRows();
-    write(STDIN_FILENO, "\x1b[H", 3);
+    write(STDOUT_FILENO, "\x1b[H", 3);
 }
 
 /*** init ***/
