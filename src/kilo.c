@@ -116,10 +116,9 @@ int getCurrentCursorPosition(int* rows, int* cols){
     char buf[32];
     unsigned int i = 0;
 
-    // this writes the position of the cursor to the bottom right end of the screen
     // writing to stdout file is basically writing to the screen an output value of values
     // writing the escape sequence with the 'n' comand sends a query to the terminal to
-    // return the cursor's position on the screen
+    // return the cursor's position on the screen via the argument '6' returns the cursor position
     if(write(STDOUT_FILENO, "\x1b[6n", 4) != 4){ 
         ret = -1;
     }else{
@@ -161,13 +160,14 @@ int getCurrentCursorPosition(int* rows, int* cols){
 int getWindowSize(int* rows, int* cols){
     struct winsize ws;
     int ret;
-    if(1 || (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) ==-1) || (ws.ws_col == 0)){
+    if(1 || (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) || (ws.ws_col == 0)){
         //this condition writes the position of the cursor to the bottom right end of the screen
         if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12){// fall back procedure
             ret = -1;
         }else{
-            // write(STDOUT_FILENO, )editorReadKey();
-            ret = getCurrentCursorPosition(rows, cols);
+            printf("%c\r\n", editorReadKey());
+            ret = 0;
+            // ret = getCurrentCursorPosition(rows, cols);
         }
     }else{
         *rows = ws.ws_row;
