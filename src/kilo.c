@@ -149,7 +149,7 @@ void editorDrawRows(appendBuf* ab){
         if (y < EdiCfg.screenRows - 1) {
             bufferAppendFunc(ab, "\r\n", 2);
         }
-    }
+    }//
 }
 
 void editorClearScreen(void){
