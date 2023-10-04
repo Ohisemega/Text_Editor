@@ -1,8 +1,10 @@
 /*** includes ***/
 #include <stdio.h>
+#include <stdint.h>
 #include <errno.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <string.h>
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -20,6 +22,8 @@
 // state to it's original value at program inception
 
 struct editorCfg{
+    int cur_x;
+    int cur_y;
     int screenRows;
     int screenColumns;
     struct termios orig_termios;
@@ -99,15 +103,61 @@ void enableRawMode(void){
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
 
-/******************************************************** OUTPUT **********************************************/
-void editorDrawRows(void){
-    int y;
+/******************************************************** APPEND BUFFER********************************************/
+// This module helps us to avoid multiple calls to the "write" function
+#define INIT_BUFF {NULL, 0}
+typedef struct appendBuf {
+  char *buferPtr;
+  int64_t len;
+}appendBuf;
+
+void bufferAppendFunc(appendBuf* objPtr, const char*s, int64_t len){
+    char* new = realloc(objPtr->buferPtr, objPtr->len + len);
+
+    if(new == NULL) die("realloc");
+    
+    memcpy(&new[objPtr->len], s, len);
+    objPtr->buferPtr = new;
+    objPtr->len += len;
+}
+
+void bufferReleaseFunc(appendBuf* bufPtr){
+    free(bufPtr->buferPtr);
+}
+
+/******************************************************** OUTPUT **************************************************/
+#define KILO_VERSION "0.0.1"
+void editorDrawRows(appendBuf* ab){
+    int64_t y;
+    int64_t third_of_screen = EdiCfg.screenRows / 3; 
     for(y = 0; y < EdiCfg.screenRows; ++y){
-        write(STDOUT_FILENO, "~\r\n", 3);
+        if(y == third_of_screen){
+            char welcomeMessg[80];
+            int welcomeLen = snprintf(welcomeMessg, sizeof(welcomeMessg), "Kilo editor -- version %s", KILO_VERSION);
+            if (welcomeLen > EdiCfg.screenColumns) welcomeLen = EdiCfg.screenColumns;
+            int padding = (EdiCfg.screenColumns - welcomeLen) / 2;
+            if (padding) {
+                bufferAppendFunc(ab, "~", 1);
+                --padding;
+            }
+            while (--padding) bufferAppendFunc(ab, " ", 1);
+            bufferAppendFunc(ab, welcomeMessg, welcomeLen);
+        }else{
+            bufferAppendFunc(ab, "~", 1);
+        }
+        bufferAppendFunc(ab, "\x1b[K", 3);
+        if (y < EdiCfg.screenRows - 1) {
+            bufferAppendFunc(ab, "\r\n", 2);
+        }
     }
 }
 
 void editorClearScreen(void){
+    appendBuf buf = INIT_BUFF;
+
+    // The h and l modes help us tun hide and show the cursor 
+    bufferAppendFunc(&buf, "\x1b[?25l]", 6);
+
     // The 4 in our write() call means we are writing 4 bytes out to the terminal. 
     // The first byte is \x1b, which is the escape character, or 27 in decimal.
     // folowed by the '[' character. This is known as the ESCAPE SEQUENCE.
@@ -117,15 +167,18 @@ void editorClearScreen(void){
     // in the format: \x1bNJ where 'N' is a number. J is the command and J clears the screen.
     // 0 is the default number for the 'J' command, and it clears the screen from the cursor to
     // the end. Both STD_OUT and write(...) come from <unistd.h> library header file
-    write(STDOUT_FILENO, "\x1b[2J", 4);
+    // bufferAppendFunc(&buf, "\x1b[2J", 4);
     
     // the 'H' - command actually helps to position the cursor. The H command actually takes two arguments:
     // the row number and the column number at which to position the cursor. Multiple arguments are separated 
     // by a ; character. For example "\x1b[12;24H"
-    write(STDOUT_FILENO, "\x1b[H", 3);
+    bufferAppendFunc(&buf, "\x1b[H", 3);
 
-    editorDrawRows();
-    write(STDOUT_FILENO, "\x1b[H", 3);
+    editorDrawRows(&buf);
+    bufferAppendFunc(&buf, "\x1b[H]", 3);
+    bufferAppendFunc(&buf, "\x1b[?25l]", 6);
+    write(STDOUT_FILENO, buf.buferPtr, buf.len);
+    bufferReleaseFunc(&buf);
 }
 
 /********************************************** INPUT ***************************************************/
@@ -195,7 +248,7 @@ int getCurrentCursorPosition(int* rows, int* cols){
  *  On most systems, you should be able to get the size of the terminal by 
  *  simply calling ioctl() with the TIOCGWINSZ request. (As far as I can tell, 
  *  it stands for Terminal IOCtl (which itself stands for Input/Output Control) 
- *  Get WINdow SiZe.
+ *  Get Window SiZe.
  */
 
 /*  As a fail safe, we can get the window size by moving the cursor 
@@ -210,8 +263,6 @@ int getWindowSize(int* rows, int* cols){
         if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12){// fall back procedure
             ret = -1;
         }else{
-            printf("%c\r\n", editorReadKey());
-            // ret = 0;
             ret = getCurrentCursorPosition(rows, cols);
         }
     }else{
