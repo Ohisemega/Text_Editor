@@ -27,7 +27,7 @@ struct editorCfg{
 
 struct editorCfg EdiCfg;
 
-/*** terminal ***/
+/********************************************TERMINAL CONFG************************************/
 /* the die function prints an error message and exits the function
     Most C library functions that fail will set the global errno variable 
     to indicate what the error was. perror() looks at the global errno variable and 
@@ -56,11 +56,11 @@ void disbleRawMode(){
 // On default the terminal is in 'cooked mode' or 'canonical mode' meaning that characters are passed into the stream buffer
 // and enter must be pressed before the characters are processed now, we intend toset it to 'raw mode' 
 // to do this, we use the tcgetattr() function to read the current attributes into a struct and write the terminal attributes back out.
-void enableRawMode(){
+void enableRawMode(void){
     if (tcgetattr(STDIN_FILENO, &EdiCfg.orig_termios) == -1) die("tcsetattr");
     struct termios raw = EdiCfg.orig_termios;
     
-    // atexit() function is called whenever the program exits
+    // atexit() function is automatically called whenever the program exits
     atexit(disbleRawMode);
 
     // the ICANON flag (2 in decimal or 0b 0000 0010) allows us to turn off the canonical flag and 
@@ -78,7 +78,9 @@ void enableRawMode(){
 
     // VMIN and VTIME are terminal flags that come from termios library.
     // they are indexes into the c_cc[] array which are called control characters
-    // which are various bits for setting terminal control
+    // which are various bits for setting terminal controls -
+    // an array of bytes that control various terminal settings
+    // The VMIN value sets the minimum number of bytes of input needed before read() can return
     //
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 10;
@@ -97,7 +99,37 @@ void enableRawMode(){
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
 
-char editorReadKey(){
+/******************************************************** OUTPUT **********************************************/
+void editorDrawRows(void){
+    int y;
+    for(y = 0; y < EdiCfg.screenRows; ++y){
+        write(STDOUT_FILENO, "~\r\n", 3);
+    }
+}
+
+void editorClearScreen(void){
+    // The 4 in our write() call means we are writing 4 bytes out to the terminal. 
+    // The first byte is \x1b, which is the escape character, or 27 in decimal.
+    // folowed by the '[' character. This is known as the ESCAPE SEQUENCE.
+    /* Escape sequences instruct the terminal to do various text formatting tasks, 
+       such as coloring text, moving the cursor around, and clearing parts of the screen. */
+    // escape sequence commands take 2 arguments: an number (N) and a letter (J, H, e.t.c)
+    // in the format: \x1bNJ where 'N' is a number. J is the command and J clears the screen.
+    // 0 is the default number for the 'J' command, and it clears the screen from the cursor to
+    // the end. Both STD_OUT and write(...) come from <unistd.h> library header file
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    
+    // the 'H' - command actually helps to position the cursor. The H command actually takes two arguments:
+    // the row number and the column number at which to position the cursor. Multiple arguments are separated 
+    // by a ; character. For example "\x1b[12;24H"
+    write(STDOUT_FILENO, "\x1b[H", 3);
+
+    editorDrawRows();
+    write(STDOUT_FILENO, "\x1b[H", 3);
+}
+
+/********************************************** INPUT ***************************************************/
+char editorReadKey(void){
     int nread;
     char c;
     /*In Cygwin, when read() times out it returns -1 with an errno of EAGAIN, 
@@ -105,6 +137,16 @@ char editorReadKey(){
         we won’t treat EAGAIN as an error.*/
     while ((nread = read(STDIN_FILENO, &c, 1)) != 1){
         if(nread == -1 && errno != EAGAIN) die("editorReadKey");
+    }
+    return c;
+}
+
+char editorProcessKeyPress(void){
+    char c = editorReadKey();
+    switch (c){
+        case CNTRL_KEY('q'):
+            exit(0);
+            break;
     }
     return c;
 }
@@ -148,15 +190,18 @@ int getCurrentCursorPosition(int* rows, int* cols){
     return ret;
 }
 
+/********************************************** INITIALIZATION ****************************************/
 /*
-    On most systems, you should be able to get the size of the terminal by 
-    simply calling ioctl() with the TIOCGWINSZ request. (As far as I can tell, 
-    it stands for Terminal IOCtl (which itself stands for Input/Output Control) 
-    Get WINdow SiZe.)
-*/
+ *  On most systems, you should be able to get the size of the terminal by 
+ *  simply calling ioctl() with the TIOCGWINSZ request. (As far as I can tell, 
+ *  it stands for Terminal IOCtl (which itself stands for Input/Output Control) 
+ *  Get WINdow SiZe.
+ */
+
 /*  As a fail safe, we can get the window size by moving the cursor 
-        to the bottom of the screen and using the escape sequence route to 
-        query the device cursor's position*/
+ *  to the bottom of the screen and using the escape sequence route to 
+ *  query the device cursor's position
+ */
 int getWindowSize(int* rows, int* cols){
     struct winsize ws;
     int ret;
@@ -166,8 +211,8 @@ int getWindowSize(int* rows, int* cols){
             ret = -1;
         }else{
             printf("%c\r\n", editorReadKey());
-            ret = 0;
-            // ret = getCurrentCursorPosition(rows, cols);
+            // ret = 0;
+            ret = getCurrentCursorPosition(rows, cols);
         }
     }else{
         *rows = ws.ws_row;
@@ -175,51 +220,10 @@ int getWindowSize(int* rows, int* cols){
         ret = 0;
     }
     return ret;
-} 
-
-/*** input ***/
-char editorProcessKeyPress(){
-    char c = editorReadKey();
-    switch (c){
-        case CNTRL_KEY('q'):
-            exit(0);
-            break;
-    }
-    return c;
 }
 
-/*** output ***/
-void editorDrawRows(){
-    int y;
-    for(y = 0; y < EdiCfg.screenRows; ++y){
-        write(STDOUT_FILENO, "~\r\n", 3);
-    }
-}
-
-void editorClearScreen(){
-    // The 4 in our write() call means we are writing 4 bytes out to the terminal. 
-    // The first byte is \x1b, which is the escape character, or 27 in decimal.
-    // folowed by the '[' character. This is known as the ESCAPE SEQUENCE.
-    /* Escape sequences instruct the terminal to do various text formatting tasks, 
-       such as coloring text, moving the cursor around, and clearing parts of the screen. */
-    // escape sequence commands take 2 arguments: an number (N) and a letter (J, H, e.t.c)
-    // in the format: \x1bNJ where 'N' is a number. J is the command and J clears the screen.
-    // 0 is the default number for the 'J' command, and it clears the screen from the cursor to
-    // the end. Both STD_OUT and write(...) come from <unistd.h> library header file
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-    
-    // the 'H' - command actually helps to position the cursor. The H command actually takes two arguments:
-    // the row number and the column number at which to position the cursor. Multiple arguments are separated 
-    // by a ; character. For example "\x1b[12;24H"
-    write(STDOUT_FILENO, "\x1b[H", 3);
-
-    editorDrawRows();
-    write(STDOUT_FILENO, "\x1b[H", 3);
-}
-
-/*** init ***/
 //initTheEditor()'s role is to provide the dimensions of the screen 
-void initTheEditor(){
+void initTheEditor(void){
     if(getWindowSize(&EdiCfg.screenRows, &EdiCfg.screenColumns) == -1) die("initTheEditor");
 }
 
