@@ -22,8 +22,8 @@
 // state to it's original value at program inception
 
 struct editorCfg{
-    int cur_x;
-    int cur_y;
+    int cur_x; // the horizontal coordinate of the cursor (the columns)
+    int cur_y; // the vertical coordinate of the cursor (the rows)
     int screenRows;
     int screenColumns;
     struct termios orig_termios;
@@ -103,6 +103,39 @@ void enableRawMode(void){
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
 
+char editorReadKey(void){
+    int nread;
+    char c;
+    /*  In Cygwin, when read() times out it returns -1 with an errno of EAGAIN, 
+     *  instead of just returning 0 like it’s supposed to. To make it work in Cygwin,
+     *  we won’t treat EAGAIN as an error.
+     *  this function keeps reading from the STDIN file i.e. standard input or keyboard
+     *  until it can no longer get any characters
+     */
+    while ((nread = read(STDIN_FILENO, &c, 1)) != 1){ // polls the STDIN device untill a character is found
+        if(nread == -1 && errno != EAGAIN) die("read");
+    }
+
+    if(c == '\x1b'){
+        char charSequence[3];
+        if(read(STDIN_FILENO, &charSequence[0], 1) != 1) return '\x1b';
+        if(read(STDIN_FILENO, &charSequence[1], 1) != 1) return '\x1b';
+
+        if(charSequence[0] == '['){
+            switch (charSequence[1]){
+                case 'A': return 'w';
+                case 'B': return 's';
+                case 'C': return 'd';
+                case 'D': return 'a';
+            }
+        }
+        return '\x1b';
+    }else{
+        return c;
+    }
+    return c;
+}
+
 /******************************************************** APPEND BUFFER********************************************/
 // This module helps us to avoid multiple calls to the "write" function
 #define INIT_BUFF {NULL, 0}
@@ -175,32 +208,53 @@ void editorClearScreen(void){
     bufferAppendFunc(&buf, "\x1b[H", 3);
 
     editorDrawRows(&buf);
-    bufferAppendFunc(&buf, "\x1b[H]", 3);
-    bufferAppendFunc(&buf, "\x1b[?25l]", 6);
+
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", EdiCfg.cur_y + 1, EdiCfg.cur_x + 1);
+    bufferAppendFunc(&buf, buffer, strlen(buffer));
+
+    bufferAppendFunc(&buf, "\x1b[?25h", 6);
     write(STDOUT_FILENO, buf.buferPtr, buf.len);
     bufferReleaseFunc(&buf);
 }
 
 /********************************************** INPUT ***************************************************/
-char editorReadKey(void){
-    int nread;
-    char c;
-    /*In Cygwin, when read() times out it returns -1 with an errno of EAGAIN, 
-        instead of just returning 0 like it’s supposed to. To make it work in Cygwin,
-        we won’t treat EAGAIN as an error.*/
-    while ((nread = read(STDIN_FILENO, &c, 1)) != 1){
-        if(nread == -1 && errno != EAGAIN) die("editorReadKey");
-    }
-    return c;
+void moveCursor(char key){
+    switch (key)
+    {
+    case 'a':
+        --EdiCfg.cur_x;
+        break;
+    case 'd':
+        ++EdiCfg.cur_x;
+        break;
+    case 'w':
+        --EdiCfg.cur_y;
+        break;
+    case 's':
+        ++EdiCfg.cur_y;
+        break;
+    default:
+        break;
+    };
 }
 
-char editorProcessKeyPress(void){
+char editorKeyPressProcess(void){
     char c = editorReadKey();
     switch (c){
         case CNTRL_KEY('q'):
+            // clear screen on quit program
+            // write(STDOUT_FILENO, "\x1b[2J", 4);
+            // write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
             break;
-    }
+        case 'a':
+        case 'd':
+        case 'w':
+        case 's':
+            moveCursor(c);
+            break;
+    };
     return c;
 }
 
@@ -255,7 +309,7 @@ int getCurrentCursorPosition(int* rows, int* cols){
  *  to the bottom of the screen and using the escape sequence route to 
  *  query the device cursor's position
  */
-int getWindowSize(int* rows, int* cols){
+int getWinSize(int* rows, int* cols){
     struct winsize ws;
     int ret;
     if(1 || (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) || (ws.ws_col == 0)){
@@ -275,7 +329,9 @@ int getWindowSize(int* rows, int* cols){
 
 //initTheEditor()'s role is to provide the dimensions of the screen 
 void initTheEditor(void){
-    if(getWindowSize(&EdiCfg.screenRows, &EdiCfg.screenColumns) == -1) die("initTheEditor");
+    EdiCfg.cur_x = 0;
+    EdiCfg.cur_y = 0;
+    if(getWinSize(&EdiCfg.screenRows, &EdiCfg.screenColumns) == -1) die("getWinSize");
 }
 
 int main(){
@@ -284,7 +340,7 @@ int main(){
     while (1){
         char c = '\0';  
         editorClearScreen();
-        c = editorProcessKeyPress(); 
+        c = editorKeyPressProcess(); 
         // if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN)
         //     die("read");
         if(iscntrl(c)){
